@@ -19,7 +19,7 @@ interface ChartPoint {
   close?: number;
 }
 
-type TimeframeType = '5s' | '10s' | '15s' | '30s' | '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
+type TimeframeType = '2s' | '5s' | '10s' | '15s' | '30s' | '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
 
 interface ChartProps {
   theme?: 'dark' | 'light';
@@ -27,7 +27,8 @@ interface ChartProps {
 
 export function Chart({ theme = 'dark' }: ChartProps) {
   const [symbol, setSymbol] = useState('AAPL');
-  const [timeframe, setTimeframe] = useState<TimeframeType>('5s');
+  // Fixed interval at 2 seconds
+  const timeframe: TimeframeType = '2s';
   const [chartPoints, setChartPoints] = useState<ChartPoint[]>([]);
   const [stats, setStats] = useState({
     high: 0,
@@ -40,6 +41,7 @@ export function Chart({ theme = 'dark' }: ChartProps) {
   // Get timeframe in milliseconds
   const getTimeframeMs = (tf: TimeframeType): number => {
     const timeframeMap: Record<TimeframeType, number> = {
+      '2s': 2 * 1000,
       '5s': 5 * 1000,
       '10s': 10 * 1000,
       '15s': 15 * 1000,
@@ -331,7 +333,7 @@ export function Chart({ theme = 'dark' }: ChartProps) {
   const rawMaxPrice = Math.max(...chartPoints.map((p) => p.high || p.price), stats.high || 100);
   const rawMinPrice = Math.min(...chartPoints.map((p) => p.low || p.price), stats.low || 50);
   const rawRange = rawMaxPrice - rawMinPrice || 1;
-  const padding = rawRange * 0.05; // 5% padding on each side
+  const padding = rawRange * 0.15; // 15% padding on each side to prevent line touching edges
   const maxPrice = rawMaxPrice + padding;
   const minPrice = Math.max(0, rawMinPrice - padding); // Don't go below 0
 
@@ -402,26 +404,9 @@ export function Chart({ theme = 'dark' }: ChartProps) {
               </option>
             ))}
           </select>
-          <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {(['5s', '10s', '15s', '30s', '1m', '5m', '15m', '1h', '4h', '1D'] as TimeframeType[]).map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  backgroundColor: timeframe === tf ? colors.upColor : colors.bgSecondary,
-                  color: timeframe === tf ? '#ffffff' : colors.text,
-                  border: `1px solid ${timeframe === tf ? colors.upColor : colors.border}`,
-                  borderRadius: '0.375rem',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer',
-                  fontWeight: timeframe === tf ? 'bold' : 'normal',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                {tf}
-              </button>
-            ))}
+          <div style={{ marginTop: '0.75rem', padding: '0.5rem', backgroundColor: colors.bg, borderRadius: '0.375rem', border: `1px solid ${colors.border}` }}>
+            <span style={{ color: colors.textSecondary, fontSize: '0.875rem' }}>Interval: </span>
+            <span style={{ color: colors.text, fontWeight: 'bold', fontSize: '0.875rem' }}>2 seconds</span>
           </div>
         </div>
 
@@ -460,26 +445,27 @@ export function Chart({ theme = 'dark' }: ChartProps) {
             Waiting for price data...
           </div>
         ) : (
-          <div style={{ display: 'flex', gap: '0.5rem', height: '400px' }}>
-            {/* Y-Axis (Price Scale) */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              alignItems: 'flex-end',
-              paddingRight: '0.75rem',
-              width: '60px',
-              fontSize: '0.8rem',
-              fontWeight: '500',
-              color: colors.text,
-              borderRight: `2px solid ${colors.border}`,
-              height: '100%',
-              background: isDark
-                ? 'linear-gradient(90deg, rgba(17, 24, 39, 0.5) 0%, transparent 100%)'
-                : 'linear-gradient(90deg, rgba(249, 250, 251, 0.5) 0%, transparent 100%)',
-              paddingLeft: '0.5rem',
-            }}>
-              {yAxisLabels.map((price, idx) => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0', height: '430px' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', height: '400px' }}>
+              {/* Y-Axis (Price Scale) */}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                paddingRight: '0.75rem',
+                width: '60px',
+                fontSize: '0.8rem',
+                fontWeight: '500',
+                color: colors.text,
+                borderRight: `2px solid ${colors.border}`,
+                height: '100%',
+                background: isDark
+                  ? 'linear-gradient(90deg, rgba(17, 24, 39, 0.5) 0%, transparent 100%)'
+                  : 'linear-gradient(90deg, rgba(249, 250, 251, 0.5) 0%, transparent 100%)',
+                paddingLeft: '0.5rem',
+              }}>
+                {yAxisLabels.map((price, idx) => (
                 <div
                   key={idx}
                   style={{
@@ -495,207 +481,185 @@ export function Chart({ theme = 'dark' }: ChartProps) {
               ))}
             </div>
 
-            {/* Chart Area with Grid */}
-            <div style={{ 
-              flex: 1, 
-              position: 'relative', 
-              display: 'flex', 
-              flexDirection: 'column', 
-              height: '100%', 
-              minHeight: 0,
-              background: isDark 
-                ? 'linear-gradient(135deg, rgba(31, 41, 55, 0.5) 0%, rgba(17, 24, 39, 0.8) 100%)'
-                : 'linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(249, 250, 251, 0.8) 100%)',
-              borderRadius: '0.25rem',
-            }}>
-              {/* Grid Lines */}
-              <div style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: '30px',
-                pointerEvents: 'none',
+              {/* Chart Area with Grid */}
+              <div style={{ 
+                flex: 1, 
+                position: 'relative', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                height: '100%', 
+                minHeight: 0,
+                background: isDark 
+                  ? 'linear-gradient(135deg, rgba(31, 41, 55, 0.5) 0%, rgba(17, 24, 39, 0.8) 100%)'
+                  : 'linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(249, 250, 251, 0.8) 100%)',
+                borderRadius: '0.25rem',
               }}>
-                {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
-                  <div
-                    key={`grid-${ratio}`}
-                    style={{
-                      position: 'absolute',
-                      top: `${(1 - ratio) * 100}%`,
-                      left: 0,
-                      right: 0,
-                      height: '1px',
-                      background: isDark
-                        ? `linear-gradient(90deg, transparent, ${colors.border}, transparent)`
-                        : `linear-gradient(90deg, transparent, rgba(229, 231, 235, 0.5), transparent)`,
-                      opacity: ratio === 0.5 ? 0.5 : 0.25,
-                      transition: 'opacity 0.3s ease',
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Price Line Connecting Points */}
-              <svg
-                style={{
+                {/* Grid Lines */}
+                <div style={{
                   position: 'absolute',
                   top: 0,
                   left: 0,
-                  width: '100%',
-                  height: 'calc(100% - 30px)',
+                  right: 0,
+                  bottom: 0,
                   pointerEvents: 'none',
-                  zIndex: 1,
-                }}
-              >
-                {/* Close Price Line */}
-                <polyline
-                  points={chartPoints
-                    .map((point, idx) => {
-                      const closePrice = point.close || point.price;
-                      const closeNormalized = ((closePrice - displayMinPrice) / displayPriceRange) || 0.5;
-                      const x = ((idx + 0.5) / chartPoints.length) * 100;
-                      const y = (1 - closeNormalized) * 100;
-                      return `${x},${y}`;
-                    })
-                    .join(' ')}
-                  fill="none"
-                  stroke={isDark ? '#3b82f6' : '#2563eb'}
-                  strokeWidth="2.5"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  opacity="0.85"
-                  style={{
-                    filter: 'drop-shadow(0 2px 4px rgba(59, 130, 246, 0.4))',
-                  }}
-                />
-                
-                {/* High-Low Range Area */}
-                <polygon
-                  points={
-                    chartPoints
-                      .map((point, idx) => {
-                        const highPrice = point.high || point.price;
-                        const highNormalized = ((highPrice - displayMinPrice) / displayPriceRange) || 0.5;
-                        const x = ((idx + 0.5) / chartPoints.length) * 100;
-                        const y = (1 - highNormalized) * 100;
-                        return `${x},${y}`;
-                      })
-                      .join(' ') +
-                    ' ' +
-                    [...chartPoints]
-                      .reverse()
-                      .map((point, idx) => {
-                        const lowPrice = point.low || point.price;
-                        const lowNormalized = ((lowPrice - displayMinPrice) / displayPriceRange) || 0.5;
-                        const x = ((chartPoints.length - idx - 0.5) / chartPoints.length) * 100;
-                        const y = (1 - lowNormalized) * 100;
-                        return `${x},${y}`;
-                      })
-                      .join(' ')
-                  }
-                  fill={isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(37, 99, 235, 0.08)'}
-                  stroke="none"
-                />
-                
-                {/* Price Points */}
-                {chartPoints.map((point, idx) => {
-                  const closePrice = point.close || point.price;
-                  const closeNormalized = ((closePrice - displayMinPrice) / displayPriceRange) || 0.5;
-                  const x = ((idx + 0.5) / chartPoints.length) * 100;
-                  const y = (1 - closeNormalized) * 100;
-                  const isUp = (point.close || point.price) >= (point.open || point.price);
-                  
-                  return (
-                    <circle
-                      key={`point-${idx}`}
-                      cx={`${x}%`}
-                      cy={`${y}%`}
-                      r="3"
-                      fill={isUp ? '#10b981' : '#ef4444'}
-                      stroke={isDark ? '#1f2937' : '#ffffff'}
-                      strokeWidth="1.5"
-                      opacity="0.9"
-                    />
-                  );
-                })}
-              </svg>
-
-              {/* Candlestick Chart */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-end',
-                justifyContent: 'space-around',
-                flex: 1,
-                gap: '2px',
-                paddingTop: '1.5rem',
-                paddingBottom: '1.5rem',
-                paddingRight: '0.5rem',
-                paddingLeft: '0.5rem',
-                position: 'relative',
-                zIndex: 2,
-              }}>
-                {chartPoints.map((point, idx) => {
-                  const highNormalized =
-                    ((point.high !== undefined ? point.high : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
-                  const lowNormalized =
-                    ((point.low !== undefined ? point.low : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
-                  const openNormalized =
-                    ((point.open !== undefined ? point.open : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
-                  const closeNormalized =
-                    ((point.close !== undefined ? point.close : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
-                  
-                  const isUp = (point.close || point.price) >= (point.open || point.price);
-                  
-                  // Ensure minimum height for small ranges - scale up tiny candles
-                  let bodyHeight = Math.abs(closeNormalized - openNormalized);
-                  let wickHeight = highNormalized - lowNormalized;
-                  
-                  // If range is very small, amplify the display
-                  if (displayPriceRange < 1) {
-                    // Amplify up to 3x for very small ranges
-                    const amplification = Math.min(3, Math.max(1, 1 / (displayPriceRange * 100)));
-                    bodyHeight = Math.max(bodyHeight * amplification, 6);
-                    wickHeight = Math.max(wickHeight * amplification, 4);
-                  } else {
-                    bodyHeight = Math.max(bodyHeight, 5);
-                    wickHeight = Math.max(wickHeight, 2);
-                  }
-                  
-                  const volume = Math.random() * 0.4 + 0.2; // Simulated volume intensity
-                  
-                  const upGradient = isDark 
-                    ? 'linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%)'
-                    : 'linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%)';
-                  const downGradient = isDark 
-                    ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%)'
-                    : 'linear-gradient(135deg, #f87171 0%, #ef4444 50%, #dc2626 100%)';
-                  
-                  return (
+                }}>
+                  {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
                     <div
-                      key={idx}
+                      key={`grid-${ratio}`}
                       style={{
-                        flex: 1,
-                        display: 'flex',
-                        alignItems: 'flex-end',
-                        justifyContent: 'center',
-                        minHeight: '100%',
-                        minWidth: '8px',
-                        transition: 'all 0.2s ease',
-                        cursor: 'pointer',
-                        opacity: 0.7,
+                        position: 'absolute',
+                        top: `${(1 - ratio) * 100}%`,
+                        left: 0,
+                        right: 0,
+                        height: '1px',
+                        background: isDark
+                          ? `linear-gradient(90deg, transparent, ${colors.border}, transparent)`
+                          : `linear-gradient(90deg, transparent, rgba(229, 231, 235, 0.5), transparent)`,
+                        opacity: ratio === 0.5 ? 0.5 : 0.25,
+                        transition: 'opacity 0.3s ease',
                       }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLElement).style.opacity = '1';
-                        (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5))';
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.opacity = '0.7';
-                        (e.currentTarget as HTMLElement).style.filter = 'none';
-                      }}
-                      title={`${point.time}: O: $${(point.open || point.price).toFixed(2)} H: $${(point.high || point.price).toFixed(2)} L: $${(point.low || point.price).toFixed(2)} C: $${(point.close || point.price).toFixed(2)}`}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', gap: '0px' }}>
+                    />
+                  ))}
+                </div>
+
+                {/* Price Line Connecting Points */}
+                <svg
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                >
+                  {/* High-Low Range Area */}
+                  <polygon
+                    points={
+                      chartPoints
+                        .map((point, idx) => {
+                          const highPrice = point.high || point.price;
+                          const highNormalized = ((highPrice - displayMinPrice) / displayPriceRange) || 0.5;
+                          const x = ((idx + 0.5) / chartPoints.length) * 100;
+                          const y = (1 - highNormalized) * 100;
+                          return `${x},${y}`;
+                        })
+                        .join(' ') +
+                      ' ' +
+                      [...chartPoints]
+                        .reverse()
+                        .map((point, idx) => {
+                          const lowPrice = point.low || point.price;
+                          const lowNormalized = ((lowPrice - displayMinPrice) / displayPriceRange) || 0.5;
+                          const x = ((chartPoints.length - idx - 0.5) / chartPoints.length) * 100;
+                          const y = (1 - lowNormalized) * 100;
+                          return `${x},${y}`;
+                        })
+                        .join(' ')
+                    }
+                    fill={isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(37, 99, 235, 0.08)'}
+                    stroke="none"
+                  />
+                  
+                  {/* Price Points */}
+                  {chartPoints.map((point, idx) => {
+                    const closePrice = point.close || point.price;
+                    const closeNormalized = ((closePrice - displayMinPrice) / displayPriceRange) || 0.5;
+                    const x = ((idx + 0.5) / chartPoints.length) * 100;
+                    const y = (1 - closeNormalized) * 100;
+                    const isUp = (point.close || point.price) >= (point.open || point.price);
+                    
+                    return (
+                      <circle
+                        key={`point-${idx}`}
+                        cx={`${x}%`}
+                        cy={`${y}%`}
+                        r="3"
+                        fill={isUp ? '#10b981' : '#ef4444'}
+                        stroke={isDark ? '#1f2937' : '#ffffff'}
+                        strokeWidth="1.5"
+                        opacity="0.9"
+                      />
+                    );
+                  })}
+                </svg>
+
+                {/* Candlestick Chart */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-around',
+                  flex: 1,
+                  gap: '2px',
+                  paddingTop: '1.5rem',
+                  paddingBottom: '1.5rem',
+                  paddingRight: '0.5rem',
+                  paddingLeft: '0.5rem',
+                  position: 'relative',
+                  zIndex: 2,
+                }}>
+                  {chartPoints.map((point, idx) => {
+                    const highNormalized =
+                      ((point.high !== undefined ? point.high : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
+                    const lowNormalized =
+                      ((point.low !== undefined ? point.low : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
+                    const openNormalized =
+                      ((point.open !== undefined ? point.open : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
+                    const closeNormalized =
+                      ((point.close !== undefined ? point.close : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
+                    
+                    const isUp = (point.close || point.price) >= (point.open || point.price);
+                    
+                    // Ensure minimum height for small ranges - scale up tiny candles
+                    let bodyHeight = Math.abs(closeNormalized - openNormalized);
+                    let wickHeight = highNormalized - lowNormalized;
+                    
+                    // If range is very small, amplify the display
+                    if (displayPriceRange < 1) {
+                      // Amplify up to 3x for very small ranges
+                      const amplification = Math.min(3, Math.max(1, 1 / (displayPriceRange * 100)));
+                      bodyHeight = Math.max(bodyHeight * amplification, 6);
+                      wickHeight = Math.max(wickHeight * amplification, 4);
+                    } else {
+                      bodyHeight = Math.max(bodyHeight, 5);
+                      wickHeight = Math.max(wickHeight, 2);
+                    }
+                    
+                    const volume = Math.random() * 0.4 + 0.2; // Simulated volume intensity
+                    
+                    const upGradient = isDark 
+                      ? 'linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%)'
+                      : 'linear-gradient(135deg, #34d399 0%, #10b981 50%, #059669 100%)';
+                    const downGradient = isDark 
+                      ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%)'
+                      : 'linear-gradient(135deg, #f87171 0%, #ef4444 50%, #dc2626 100%)';
+                    
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'flex-end',
+                          justifyContent: 'center',
+                          minHeight: '100%',
+                          minWidth: '8px',
+                          transition: 'all 0.2s ease',
+                          cursor: 'pointer',
+                          opacity: 0.7,
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLElement).style.opacity = '1';
+                          (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5))';
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLElement).style.opacity = '0.7';
+                          (e.currentTarget as HTMLElement).style.filter = 'none';
+                        }}
+                        title={`${point.time}: O: $${(point.open || point.price).toFixed(2)} H: $${(point.high || point.price).toFixed(2)} L: $${(point.low || point.price).toFixed(2)} C: $${(point.close || point.price).toFixed(2)}`}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', gap: '0px' }}>
                         {/* Volume Bar Background */}
                         <div
                           style={{
@@ -740,34 +704,35 @@ export function Chart({ theme = 'dark' }: ChartProps) {
                   );
                 })}
               </div>
+            </div>
+          </div>
 
-              {/* X-Axis (Time Labels) */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                height: '35px',
-                paddingRight: '0.5rem',
-                paddingLeft: '0rem',
-                fontSize: '0.8rem',
-                fontWeight: '500',
-                color: colors.text,
-                borderTop: `2px solid ${colors.border}`,
-                background: isDark
-                  ? 'linear-gradient(180deg, transparent 0%, rgba(17, 24, 39, 0.3) 100%)'
-                  : 'linear-gradient(180deg, transparent 0%, rgba(249, 250, 251, 0.3) 100%)',
-                gap: '0.5rem',
-              }}>
-                {chartPoints.length > 0 && (
-                  <>
-                    <span style={{ opacity: 0.8, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`Start: ${timeStart}`}>{timeStart}</span>
-                    <span style={{ opacity: 0.6, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`${Math.floor(chartPoints.length * 0.25)} candles`}>{chartPoints[Math.floor(chartPoints.length * 0.25)].time}</span>
-                    <span style={{ opacity: 0.8, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`Midpoint: ${Math.floor(chartPoints.length * 0.5)} candles`}>{chartPoints[Math.floor(chartPoints.length * 0.5)].time}</span>
-                    <span style={{ opacity: 0.6, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`${Math.floor(chartPoints.length * 0.75)} candles`}>{chartPoints[Math.floor(chartPoints.length * 0.75)].time}</span>
-                    <span style={{ opacity: 0.8, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`End: ${timeEnd}`}>{timeEnd}</span>
-                  </>
-                )}
-              </div>
+            {/* X-Axis (Time Labels) - Properly positioned at the bottom */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              height: '30px',
+              paddingRight: '0.5rem',
+              paddingLeft: '60px',
+              fontSize: '0.8rem',
+              fontWeight: '500',
+              color: colors.text,
+              borderTop: `2px solid ${colors.border}`,
+              background: isDark
+                ? 'linear-gradient(180deg, transparent 0%, rgba(17, 24, 39, 0.3) 100%)'
+                : 'linear-gradient(180deg, transparent 0%, rgba(249, 250, 251, 0.3) 100%)',
+              gap: '0.5rem',
+            }}>
+              {chartPoints.length > 0 && (
+                <>
+                  <span style={{ opacity: 0.8, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`Start: ${timeStart}`}>{timeStart}</span>
+                  <span style={{ opacity: 0.6, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`${Math.floor(chartPoints.length * 0.25)} candles`}>{chartPoints[Math.floor(chartPoints.length * 0.25)].time}</span>
+                  <span style={{ opacity: 0.8, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`Midpoint: ${Math.floor(chartPoints.length * 0.5)} candles`}>{chartPoints[Math.floor(chartPoints.length * 0.5)].time}</span>
+                  <span style={{ opacity: 0.6, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`${Math.floor(chartPoints.length * 0.75)} candles`}>{chartPoints[Math.floor(chartPoints.length * 0.75)].time}</span>
+                  <span style={{ opacity: 0.8, minWidth: '35px', textAlign: 'center', letterSpacing: '0.5px' }} title={`End: ${timeEnd}`}>{timeEnd}</span>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -912,7 +877,7 @@ export function Chart({ theme = 'dark' }: ChartProps) {
 
       <div style={getInfoStyle(colors)}>
         <p style={{ margin: 0, color: colors.textSecondary, fontSize: '0.875rem' }}>
-          📊 Displaying {chartPoints.length} candles ({timeframe}) | Price Range: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)} | Time: {timeStart} → {timeEnd}
+          📊 Displaying {chartPoints.length} candles (2s interval) | Price Range: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)} | Time: {timeStart} → {timeEnd}
         </p>
       </div>
     </div>
