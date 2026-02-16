@@ -1,0 +1,412 @@
+PSD Technical Refinement Answers
+=================================
+
+ARCHITECTURE
+------------
+
+1. Why Singleton for Price Engine? What are the trade-offs vs Dependency Injection?
+
+   Answer: Singleton for simplicity and guaranteed single source of truth.
+   
+   Trade-offs:
+   - Singleton Pros: Simple implementation, global access, ensures all components see same prices, no prop drilling
+   - Singleton Cons: Harder to test (need to reset state), tight coupling, harder to swap implementations
+   - DI Pros: Better testability (mock injection), loose coupling, explicit dependencies
+   - DI Cons: More boilerplate, requires context/provider setup, overkill for this scale
+   
+   Decision: Use Singleton. For a single-page paper trading app with one price source, Singleton is acceptable. Testing can reset the singleton between tests.
+
+2. Should the Trade Engine be synchronous or use an async queue pattern?
+
+   Answer: Synchronous for simplicity and atomic operations.
+   
+   Rationale:
+   - All operations are local (no network calls)
+   - Trades must be atomic (balance + portfolio update together)
+   - Async queue adds complexity without benefit for localStorage-based system
+   - Synchronous execution guarantees immediate feedback to user
+   - Easier to reason about state consistency
+   
+   Decision: Synchronous execution with immediate state updates.
+
+3. How will you prevent circular dependencies between PriceEngine, TradeEngine, and OrderEngine?
+
+   Answer: Use event-driven architecture with callbacks, not direct imports.
+   
+   Strategy:
+   - PriceEngine: Pure price generation, no knowledge of other engines
+   - TradeEngine: Executes trades, exposes functions (not importing OrderEngine)
+   - OrderEngine: Subscribes to PriceEngine for prices, calls TradeEngine functions via injection
+   - Dependency flow: OrderEngine → TradeEngine (one-way)
+   - OrderEngine subscribes to PriceEngine events (callback pattern)
+   
+   Implementation:
+   - Pass TradeEngine.executeTrade as callback to OrderEngine
+   - OrderEngine subscribes to price updates, checks triggers, calls injected trade function
+   - No engine imports another engine directly
+
+4. Should engines be classes or functional modules with closures?
+
+   Answer: Functional modules with closures for tree-shaking and simplicity.
+   
+   Comparison:
+   - Classes: OOP familiarity, explicit this context, inheritance support (not needed)
+   - Functional: Better tree-shaking, no this binding issues, cleaner with hooks, modern JS style
+   
+   Pros of Functional:
+   - Works naturally with React hooks
+   - Closure captures state without this
+   - Easier mocking in tests
+   - Smaller bundle (tree-shakeable)
+   
+   Decision: Functional modules. Example:
+   ```
+   // priceEngine.ts
+   let subscribers = new Map();
+   let prices = { BTC: 50000, ETH: 3000, SOL: 100 };
+   
+   export const subscribe = (ticker, callback) => { ... };
+   export const getPrice = (ticker) => prices[ticker];
+   ```
+
+STATE MANAGEMENT
+----------------
+
+5. Where exactly does state live?
+
+   Answer: Hybrid approach - React Context for UI state, module-level for engines.
+   
+   Breakdown:
+   - Price Engine: Module-level variables (prices, history, subscribers)
+   - Trade Engine: Module-level (portfolio, balance, trade history)
+   - Order Engine: Module-level (pending orders)
+   - UI State: React Context or component state (selected ticker, form inputs, UI flags)
+   
+   Synchronization:
+   - Engines expose subscribe() functions
+   - React components use custom hooks that subscribe via useEffect
+   - State changes trigger callbacks, hooks update local React state
+   
+   Example flow:
+   Engine state changes → callback fired → hook updates React state → component re-renders
+
+6. How will you prevent stale closure issues with 1-second price updates?
+
+   Answer: Use useRef for mutable values accessed in callbacks.
+   
+   Strategy:
+   - Store latest values in refs: const priceRef = useRef(price)
+   - Update ref in useEffect when value changes
+   - Access ref.current in callbacks (always fresh)
+   - For subscription handlers, recreate with latest deps or use ref pattern
+   
+   Example:
+   ```
+   const latestPrice = useRef(price);
+   useEffect(() => { latestPrice.current = price; }, [price]);
+   
+   const handleTrade = useCallback(() => {
+     executeTrade(ticker, quantity, latestPrice.current);
+   }, [ticker, quantity]); // price not in deps, accessed via ref
+   ```
+
+7. Should subscription cleanup be automatic (useEffect) or manual?
+
+   Answer: Automatic via useEffect cleanup - guarantees no memory leaks.
+   
+   Implementation:
+   ```
+   useEffect(() => {
+     const unsubscribe = priceEngine.subscribe(ticker, setPrice);
+     return () => unsubscribe(); // Cleanup on unmount or ticker change
+   }, [ticker]);
+   ```
+   
+   Guarantees:
+   - React handles cleanup on unmount
+   - Cleanup runs before re-subscribing on deps change
+   - No manual tracking needed
+   - Works with StrictMode double-mount in dev
+
+8. How will you handle state hydration from localStorage on app start?
+
+   Answer: Load from localStorage in module initialization, before React renders.
+   
+   Strategy:
+   - Engines load persisted state on module import (synchronous)
+   - App component calls initializeApp() in useEffect (once, no deps)
+   - initializeApp validates loaded data, sets defaults if corrupt
+   - React first render sees hydrated state
+   
+   Implementation:
+   ```
+   // persistence.ts
+   export const loadPersistedState = () => {
+     const data = localStorage.getItem('tradepulse');
+     if (data) {
+       const parsed = JSON.parse(data);
+       if (isValidSchema(parsed)) return parsed;
+     }
+     return DEFAULT_STATE;
+   };
+   
+   // tradeEngine.ts (top-level)
+   const initialState = loadPersistedState();
+   let balance = initialState.balance;
+   let portfolio = initialState.portfolio;
+   ```
+
+PERFORMANCE
+-----------
+
+9. How will you isolate updates to avoid unnecessary re-renders?
+
+   Answer: Each ticker row subscribes independently; components only re-render for their own data.
+   
+   Strategy:
+   - WatchlistItem component subscribes to ONE ticker
+   - Parent Watchlist does NOT subscribe to prices
+   - Use React.memo on WatchlistItem
+   - Chart subscribes to selected ticker only
+   - Portfolio items subscribe individually for live P&L
+   
+   Result:
+   - BTC price update → only BTC row re-renders
+   - Other tickers unaffected
+   - 3 renders/sec total (one per ticker), not 3 renders × all components
+
+10. Should chart use requestAnimationFrame or direct state updates?
+
+    Answer: Direct state updates for simplicity; RAF not needed.
+    
+    Rationale:
+    - Price updates are 1/second (1 Hz), well below 60fps
+    - RAF optimizes 60fps animations, overkill for 1 Hz
+    - Direct setState triggers React's batched rendering
+    - No visual benefit from RAF at this frequency
+    
+    Trade-offs:
+    - RAF: Smoother for high-frequency (unnecessary here), more complex
+    - Direct: Simpler, React handles scheduling, sufficient for 1 Hz
+    
+    Decision: Direct state updates. Revisit if update frequency increases.
+
+11. How many price history points before virtualization?
+
+    Answer: 500 points as threshold; implement simple windowing beyond that.
+    
+    Strategy:
+    - Chart stores last 500 points per ticker
+    - Older points dropped (shift array)
+    - No virtualization needed at 500 points for SVG
+    - If requirements change, implement line simplification (Douglas-Peucker)
+    
+    Performance note:
+    - 500 SVG path points render in <16ms
+    - Beyond 1000, consider canvas for better performance
+
+12. Should SVG path recalculation be debounced or throttled?
+
+    Answer: Neither needed at 1 Hz; use useMemo for efficiency.
+    
+    Implementation:
+    - Price updates at 1/second (no flooding)
+    - useMemo recalculates path only when data array changes
+    - Memoization prevents redundant calculations on unrelated re-renders
+    
+    ```
+    const pathD = useMemo(() => generatePath(priceHistory), [priceHistory]);
+    ```
+    
+    If frequency increases: throttle to 16ms (60fps) max.
+
+DATA INTEGRITY
+--------------
+
+13. How will you ensure atomic updates for balance and portfolio?
+
+    Answer: Single synchronous function updates both in one call.
+    
+    Implementation:
+    ```
+    const executeBuy = (ticker, quantity, price) => {
+      const total = quantity * price;
+      if (balance < total) throw new Error('Insufficient balance');
+      
+      // Atomic update - both happen or neither
+      balance -= total;
+      portfolio[ticker] = updateHolding(portfolio[ticker], quantity, price);
+      
+      recordTrade({ ticker, type: 'buy', quantity, price, timestamp: Date.now() });
+      persistState(); // Save after successful update
+      notifySubscribers();
+    };
+    ```
+    
+    No async gaps = no partial state possible.
+
+14. What happens if localStorage write fails mid-transaction?
+
+    Answer: Catch error, show warning, continue in memory-only mode.
+    
+    Strategy:
+    - Wrap localStorage.setItem in try/catch
+    - On failure: log error, show toast notification
+    - In-memory state remains source of truth
+    - App continues to function
+    - Retry persistence on next state change
+    - Consider saving subset if quota exceeded
+    
+    ```
+    const persistState = () => {
+      try {
+        localStorage.setItem('tradepulse', JSON.stringify(getState()));
+      } catch (e) {
+        console.error('Persistence failed:', e);
+        showWarning('Changes may not be saved. Storage quota exceeded.');
+        // Continue operating in memory
+      }
+    };
+    ```
+
+15. How will you prevent race conditions between limit order checks and manual trades?
+
+    Answer: Use execution flag and synchronous processing.
+    
+    Strategy:
+    - Single isExecuting flag at module level
+    - Check flag before any trade execution
+    - Set flag → execute → clear flag
+    - Limit order check runs synchronously in price update callback
+    - Manual trade button disabled during execution
+    
+    ```
+    let isExecuting = false;
+    
+    const executeTrade = (params) => {
+      if (isExecuting) throw new Error('Trade in progress');
+      isExecuting = true;
+      try {
+        // ... execute trade
+      } finally {
+        isExecuting = false;
+      }
+    };
+    ```
+
+SVG RENDERING
+-------------
+
+16. Should SVG viewBox be fixed or dynamic?
+
+    Answer: Fixed viewBox (800x400), scale content via CSS.
+    
+    Rationale:
+    - Fixed viewBox = consistent coordinate math
+    - SVG scales naturally with preserveAspectRatio
+    - Container CSS controls display size (responsive)
+    - No recalculation needed on resize
+    
+    Implementation:
+    ```
+    <svg viewBox="0 0 800 400" preserveAspectRatio="xMidYMid meet" 
+         style={{ width: '100%', height: '100%' }}>
+    ```
+    
+    Implications:
+    - Simpler path generation (always 0-800 x range)
+    - Works across screen sizes
+    - Slight aspect ratio padding on extreme ratios (acceptable)
+
+17. How will you optimize SVG path string generation for 1000+ points?
+
+    Answer: Build string with array join, not concatenation; apply windowing.
+    
+    Optimization:
+    - Use array.map + join instead of += (O(n) vs O(n²))
+    - Apply rolling window (last 500 points)
+    - Memoize path generation
+    
+    ```
+    const generatePath = (points) => {
+      if (points.length === 0) return '';
+      const commands = points.map((p, i) => 
+        `${i === 0 ? 'M' : 'L'} ${scaleX(i)} ${scaleY(p)}`
+      );
+      return commands.join(' ');
+    };
+    ```
+    
+    For 1000+: Consider Douglas-Peucker simplification or canvas.
+
+18. Should chart rerender entire SVG or use DOM diffing via keys?
+
+    Answer: Let React diff naturally; key the entire chart component.
+    
+    Strategy:
+    - Single <path d={pathD} /> element
+    - React diffs d attribute efficiently (string compare)
+    - No complex keying needed for line chart
+    - Key ticker changes to reset: <Chart key={selectedTicker} />
+    
+    Why not granular keys:
+    - Path is single element, not list
+    - DOM diffing overhead > benefit for one path
+    - Simpler mental model
+
+ERROR HANDLING
+--------------
+
+19. How will you handle and display validation errors?
+
+    Answer: Inline form errors + toast notifications for trade results.
+    
+    Strategy:
+    - Form validation: Show errors below inputs (red text)
+    - Trade execution: Toast notification (success/failure)
+    - Separate error state per form field
+    
+    Implementation:
+    ```
+    const [errors, setErrors] = useState({ quantity: '', ticker: '' });
+    
+    // In form
+    <input value={quantity} onChange={...} />
+    {errors.quantity && <span className="error">{errors.quantity}</span>}
+    
+    // On trade
+    try {
+      executeTrade(...);
+      showToast('Trade executed successfully', 'success');
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+    ```
+
+20. Should failed trades be logged? Where?
+
+    Answer: Yes, log for debugging. Store in console (dev) and trade history (prod).
+    
+    Strategy:
+    - console.error for all failures (dev debugging)
+    - Failed trades recorded in trade history with status: 'failed'
+    - Trade history persisted to localStorage
+    - Enables user to see failed attempts
+    - Helps debug production issues
+    
+    ```
+    const recordTrade = (trade, success = true) => {
+      const entry = {
+        ...trade,
+        status: success ? 'executed' : 'failed',
+        timestamp: Date.now()
+      };
+      tradeHistory.push(entry);
+      if (!success) console.error('Trade failed:', entry);
+      persistState();
+    };
+    ```
+
+=================================
+End of PSD Technical Answers
+=================================
