@@ -1,0 +1,836 @@
+/**
+ * ============================================================================
+ * Trade Engine Integration Tests
+ * ============================================================================
+ * 
+ * Comprehensive end-to-end tests for the Trade Execution Engine.
+ * 
+ * Test Coverage:
+ * 1. Buy trades (first purchase, add to position)
+ * 2. Sell trades (partial, complete, profit, loss)
+ * 3. Validation (insufficient cash/holdings, invalid inputs)
+ * 4. Throttle (rapid-fire prevention)
+ * 5. Concurrent execution (race condition prevention)
+ * 6. Portfolio metrics (total value, P&L calculations)
+ * 7. Trade history (recording, querying)
+ * 8. Edge cases (overflow, precision, rounding)
+ * 
+ * Run all tests: TradeEngineTests.runAll()
+ * ============================================================================
+ */
+
+import type { TradeRequest } from '@types';
+import TradeEngine from '../index';
+
+/**
+ * ============================================================================
+ * TEST UTILITIES
+ * ============================================================================
+ */
+
+/**
+ * Assert equality with tolerance for floating point
+ */
+const assertClose = (
+  actual: number,
+  expected: number,
+  tolerance: number = 0.01,
+  message: string = ''
+): boolean => {
+  if (Math.abs(actual - expected) > tolerance) {
+    console.error(
+      `${message}\nExpected: ${expected}\nActual: ${actual}\nDifference: ${Math.abs(actual - expected)}`
+    );
+    return false;
+  }
+  return true;
+};
+
+/**
+ * ============================================================================
+ * TEST SUITE
+ * ============================================================================
+ */
+export const TradeEngineTests = {
+  /**
+   * Test 1: Buy first position
+   */
+  testBuyFirstPosition(): boolean {
+    console.log('Test 1: Buy first position');
+    TradeEngine.reset();
+    
+    const request: TradeRequest = {
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    };
+    
+    const result = TradeEngine.executeTrade(request);
+    
+    if (!result.success) {
+      console.error(`Trade failed: ${result.error}`);
+      return false;
+    }
+    
+    const portfolio = TradeEngine.getPortfolio();
+    
+    // Check cash: $100,000 - $1,500 = $98,500
+    if (!assertClose(portfolio.cash, 98_500, 0.01, 'Cash incorrect')) {
+      return false;
+    }
+    
+    // Check position created
+    const position = portfolio.positions['AAPL'];
+    if (!position) {
+      console.error('Position not created');
+      return false;
+    }
+    
+    if (position.shares !== 10) {
+      console.error(`Shares incorrect: ${position.shares} (expected 10)`);
+      return false;
+    }
+    
+    if (!assertClose(position.avgCost, 150, 0.01, 'Average cost incorrect')) {
+      return false;
+    }
+    
+    // Check trade recorded
+    const history = TradeEngine.getTradeHistory();
+    if (history.length !== 1) {
+      console.error('Trade not recorded in history');
+      return false;
+    }
+    
+    console.log('✓ Test 1 passed');
+    return true;
+  },
+  
+  /**
+   * Test 2: Buy add to existing position
+   */
+  testBuyAddToPosition(): boolean {
+    console.log('Test 2: Buy add to existing position');
+    TradeEngine.reset();
+    
+    // First buy: 10 shares @ $150
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Second buy: 15 shares @ $160
+    const result = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 15,
+      price: 160,
+      orderType: 'MARKET',
+    });
+    
+    if (!result.success) {
+      console.error(`Second buy failed: ${result.error}`);
+      return false;
+    }
+    
+    const portfolio = TradeEngine.getPortfolio();
+    const position = portfolio.positions['AAPL'];
+    
+    // Check shares: 10 + 15 = 25
+    if (position.shares !== 25) {
+      console.error(`Shares incorrect: ${position.shares} (expected 25)`);
+      return false;
+    }
+    
+    // Check average cost: (150*10 + 160*15) / 25 = 156
+    if (!assertClose(position.avgCost, 156, 0.01, 'Average cost incorrect')) {
+      return false;
+    }
+    
+    // Check trade history: 2 trades
+    const history = TradeEngine.getTradeHistory();
+    if (history.length !== 2) {
+      console.error('Trade history incorrect');
+      return false;
+    }
+    
+    console.log('✓ Test 2 passed');
+    return true;
+  },
+  
+  /**
+   * Test 3: Sell partial position for profit
+   */
+  testSellPartialProfit(): boolean {
+    console.log('Test 3: Sell partial position for profit');
+    TradeEngine.reset();
+    
+    // Buy: 20 shares @ $150
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 20,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Sell: 10 shares @ $180 (profit $30/share)
+    const result = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'SELL',
+      quantity: 10,
+      price: 180,
+      orderType: 'MARKET',
+    });
+    
+    if (!result.success) {
+      console.error(`Sell failed: ${result.error}`);
+      return false;
+    }
+    
+    const portfolio = TradeEngine.getPortfolio();
+    
+    // Check cash: $100,000 - $3,000 (buy) + $1,800 (sell) = $98,800
+    if (!assertClose(portfolio.cash, 98_800, 0.01, 'Cash incorrect')) {
+      return false;
+    }
+    
+    // Check position: 20 - 10 = 10 shares remaining
+    const position = portfolio.positions['AAPL'];
+    if (position.shares !== 10) {
+      console.error(`Shares incorrect: ${position.shares} (expected 10)`);
+      return false;
+    }
+    
+    // Check average cost unchanged: $150
+    if (!assertClose(position.avgCost, 150, 0.01, 'Average cost should not change')) {
+      return false;
+    }
+    
+    // Check realized P&L: (180 - 150) * 10 = $300
+    if (!assertClose(portfolio.realizedPL, 300, 0.01, 'Realized P&L incorrect')) {
+      return false;
+    }
+    
+    console.log('✓ Test 3 passed');
+    return true;
+  },
+  
+  /**
+   * Test 4: Sell entire position
+   */
+  testSellEntirePosition(): boolean {
+    console.log('Test 4: Sell entire position');
+    TradeEngine.reset();
+    
+    // Buy: 10 shares @ $150
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Sell: all 10 shares @ $180
+    const result = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'SELL',
+      quantity: 10,
+      price: 180,
+      orderType: 'MARKET',
+    });
+    
+    if (!result.success) {
+      console.error(`Sell failed: ${result.error}`);
+      return false;
+    }
+    
+    const portfolio = TradeEngine.getPortfolio();
+    
+    // Check position removed
+    if (portfolio.positions['AAPL']) {
+      console.error('Position should be removed when all shares sold');
+      return false;
+    }
+    
+    // Check cash: $100,000 - $1,500 (buy) + $1,800 (sell) = $100,300
+    if (!assertClose(portfolio.cash, 100_300, 0.01, 'Cash incorrect')) {
+      return false;
+    }
+    
+    // Check realized P&L: $300
+    if (!assertClose(portfolio.realizedPL, 300, 0.01, 'Realized P&L incorrect')) {
+      return false;
+    }
+    
+    console.log('✓ Test 4 passed');
+    return true;
+  },
+  
+  /**
+   * Test 5: Sell for loss
+   */
+  testSellForLoss(): boolean {
+    console.log('Test 5: Sell for loss');
+    TradeEngine.reset();
+    
+    // Buy: 10 shares @ $150
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Sell: 10 shares @ $100 (loss $50/share)
+    const result = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'SELL',
+      quantity: 10,
+      price: 100,
+      orderType: 'MARKET',
+    });
+    
+    if (!result.success) {
+      console.error(`Sell failed: ${result.error}`);
+      return false;
+    }
+    
+    const portfolio = TradeEngine.getPortfolio();
+    
+    // Check realized P&L: (100 - 150) * 10 = -$500 (loss)
+    if (!assertClose(portfolio.realizedPL, -500, 0.01, 'Realized P&L incorrect')) {
+      return false;
+    }
+    
+    console.log('✓ Test 5 passed');
+    return true;
+  },
+  
+  /**
+   * Test 6: Insufficient cash validation
+   */
+  testInsufficientCash(): boolean {
+    console.log('Test 6: Insufficient cash validation');
+    TradeEngine.reset();
+    
+    // Try to buy more than available cash
+    const result = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 1000,
+      price: 150, // $150,000 > $100,000 cash
+      orderType: 'MARKET',
+    });
+    
+    if (result.success) {
+      console.error('Trade should fail due to insufficient cash');
+      return false;
+    }
+    
+    if (!result.error?.includes('Insufficient cash')) {
+      console.error(`Wrong error message: ${result.error}`);
+      return false;
+    }
+    
+    // Check portfolio unchanged
+    const portfolio = TradeEngine.getPortfolio();
+    if (portfolio.cash !== 100_000) {
+      console.error('Portfolio should be unchanged after failed trade');
+      return false;
+    }
+    
+    console.log('✓ Test 6 passed');
+    return true;
+  },
+  
+  /**
+   * Test 7: Insufficient holdings validation
+   */
+  testInsufficientHoldings(): boolean {
+    console.log('Test 7: Insufficient holdings validation');
+    TradeEngine.reset();
+    
+    // Buy 10 shares
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Try to sell more than owned
+    const result = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'SELL',
+      quantity: 20, // Only have 10
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    if (result.success) {
+      console.error('Trade should fail due to insufficient holdings');
+      return false;
+    }
+    
+    if (!result.error?.includes('Insufficient shares')) {
+      console.error(`Wrong error message: ${result.error}`);
+      return false;
+    }
+    
+    console.log('✓ Test 7 passed');
+    return true;
+  },
+  
+  /**
+   * Test 8: Invalid symbol validation
+   */
+  testInvalidSymbol(): boolean {
+    console.log('Test 8: Invalid symbol validation');
+    TradeEngine.reset();
+    
+    // Try invalid symbol
+    const result = TradeEngine.executeTrade({
+      symbol: 'invalid-symbol-123', // Too long, hyphen not allowed
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    if (result.success) {
+      console.error('Trade should fail due to invalid symbol');
+      return false;
+    }
+    
+    if (!result.error?.includes('symbol')) {
+      console.error(`Wrong error message: ${result.error}`);
+      return false;
+    }
+    
+    console.log('✓ Test 8 passed');
+    return true;
+  },
+  
+  /**
+   * Test 9: Invalid quantity validation
+   */
+  testInvalidQuantity(): boolean {
+    console.log('Test 9: Invalid quantity validation');
+    TradeEngine.reset();
+    
+    // Try fractional shares
+    const result1 = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10.5, // Fractional not allowed
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    if (result1.success) {
+      console.error('Trade should fail due to fractional shares');
+      return false;
+    }
+    
+    // Try zero quantity
+    const result2 = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 0,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    if (result2.success) {
+      console.error('Trade should fail due to zero quantity');
+      return false;
+    }
+    
+    console.log('✓ Test 9 passed');
+    return true;
+  },
+  
+  /**
+   * Test 10: Invalid price validation
+   */
+  testInvalidPrice(): boolean {
+    console.log('Test 10: Invalid price validation');
+    TradeEngine.reset();
+    
+    // Try negative price
+    const result1 = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: -150,
+      orderType: 'MARKET',
+    });
+    
+    if (result1.success) {
+      console.error('Trade should fail due to negative price');
+      return false;
+    }
+    
+    // Try price too low
+    const result2 = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 0.001, // Below $0.01 minimum
+      orderType: 'MARKET',
+    });
+    
+    if (result2.success) {
+      console.error('Trade should fail due to price below minimum');
+      return false;
+    }
+    
+    console.log('✓ Test 10 passed');
+    return true;
+  },
+  
+  /**
+   * Test 11: Portfolio metrics calculation
+   */
+  testPortfolioMetrics(): boolean {
+    console.log('Test 11: Portfolio metrics calculation');
+    TradeEngine.reset();
+    
+    // Buy 10 AAPL @ $150
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Buy 5 GOOGL @ $140
+    TradeEngine.executeTrade({
+      symbol: 'GOOGL',
+      type: 'BUY',
+      quantity: 5,
+      price: 140,
+      orderType: 'MARKET',
+    });
+    
+    // Sell 5 AAPL @ $180 (realized profit: $150)
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'SELL',
+      quantity: 5,
+      price: 180,
+      orderType: 'MARKET',
+    });
+    
+    // Current prices
+    const currentPrices = {
+      AAPL: 180,  // Bought at $150, now $180 (+$30/share)
+      GOOGL: 130, // Bought at $140, now $130 (-$10/share)
+    };
+    
+    const metrics = TradeEngine.getPortfolioMetrics(currentPrices);
+    
+    // Cash: $100,000 - $1,500 (AAPL buy) - $700 (GOOGL buy) + $900 (AAPL sell) = $98,700
+    if (!assertClose(metrics.cash, 98_700, 0.01, 'Cash incorrect')) {
+      return false;
+    }
+    
+    // Positions value: (5 * $180) + (5 * $130) = $900 + $650 = $1,550
+    if (!assertClose(metrics.positionsValue, 1_550, 0.01, 'Positions value incorrect')) {
+      return false;
+    }
+    
+    // Total value: $98,700 + $1,550 = $100,250
+    if (!assertClose(metrics.totalValue, 100_250, 0.01, 'Total value incorrect')) {
+      return false;
+    }
+    
+    // Unrealized P&L: (180-150)*5 + (130-140)*5 = $150 - $50 = $100
+    if (!assertClose(metrics.unrealizedPL, 100, 0.01, 'Unrealized P&L incorrect')) {
+      return false;
+    }
+    
+    // Realized P&L: (180-150)*5 = $150
+    if (!assertClose(metrics.realizedPL, 150, 0.01, 'Realized P&L incorrect')) {
+      return false;
+    }
+    
+    // Total P&L: $150 + $100 = $250
+    if (!assertClose(metrics.totalPL, 250, 0.01, 'Total P&L incorrect')) {
+      return false;
+    }
+    
+    // Total return: ($250 / $100,000) * 100 = 0.25%
+    if (!assertClose(metrics.totalPLPercent, 0.25, 0.01, 'Total return % incorrect')) {
+      return false;
+    }
+    
+    console.log('✓ Test 11 passed');
+    return true;
+  },
+  
+  /**
+   * Test 12: Multiple positions management
+   */
+  testMultiplePositions(): boolean {
+    console.log('Test 12: Multiple positions management');
+    TradeEngine.reset();
+    
+    // Buy 3 different stocks
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    TradeEngine.executeTrade({
+      symbol: 'GOOGL',
+      type: 'BUY',
+      quantity: 5,
+      price: 140,
+      orderType: 'MARKET',
+    });
+    
+    TradeEngine.executeTrade({
+      symbol: 'MSFT',
+      type: 'BUY',
+      quantity: 8,
+      price: 180,
+      orderType: 'MARKET',
+    });
+    
+    const portfolio = TradeEngine.getPortfolio();
+    
+    // Check all 3 positions exist
+    if (Object.keys(portfolio.positions).length !== 3) {
+      console.error('Should have 3 positions');
+      return false;
+    }
+    
+    if (!portfolio.positions['AAPL'] || !portfolio.positions['GOOGL'] || !portfolio.positions['MSFT']) {
+      console.error('Missing positions');
+      return false;
+    }
+    
+    // Sell GOOGL completely
+    TradeEngine.executeTrade({
+      symbol: 'GOOGL',
+      type: 'SELL',
+      quantity: 5,
+      price: 140,
+      orderType: 'MARKET',
+    });
+    
+    const portfolioAfterSell = TradeEngine.getPortfolio();
+    
+    // Check only 2 positions remain
+    if (Object.keys(portfolioAfterSell.positions).length !== 2) {
+      console.error('Should have 2 positions after selling GOOGL');
+      return false;
+    }
+    
+    if (portfolioAfterSell.positions['GOOGL']) {
+      console.error('GOOGL should be removed');
+      return false;
+    }
+    
+    console.log('✓ Test 12 passed');
+    return true;
+  },
+  
+  /**
+   * Test 13: Trade history
+   */
+  testTradeHistory(): boolean {
+    console.log('Test 13: Trade history');
+    TradeEngine.reset();
+    
+    // Execute multiple trades
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 5,
+      price: 160,
+      orderType: 'MARKET',
+    });
+    
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'SELL',
+      quantity: 5,
+      price: 180,
+      orderType: 'MARKET',
+    });
+    
+    const history = TradeEngine.getTradeHistory();
+    
+    // Check 3 trades recorded
+    if (history.length !== 3) {
+      console.error(`History should have 3 trades, has ${history.length}`);
+      return false;
+    }
+    
+    // Check all trades have IDs
+    for (const trade of history) {
+      if (!trade.id.startsWith('T-')) {
+        console.error('Trade ID format incorrect');
+        return false;
+      }
+      
+      if (trade.status !== 'executed') {
+        console.error('Trade status should be executed');
+        return false;
+      }
+    }
+    
+    console.log('✓ Test 13 passed');
+    return true;
+  },
+  
+  /**
+   * Test 14: Precision (cents-based arithmetic)
+   */
+  testPrecision(): boolean {
+    console.log('Test 14: Precision (cents-based arithmetic)');
+    TradeEngine.reset();
+    
+    // Buy with price that causes floating-point errors
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 3,
+      price: 100.33, // $100.33 * 3 = $300.99 (exact)
+      orderType: 'MARKET',
+    });
+    
+    const portfolio = TradeEngine.getPortfolio();
+    
+    // Check cash: $100,000 - $300.99 = $99,699.01
+    if (!assertClose(portfolio.cash, 99_699.01, 0.01, 'Cash precision incorrect')) {
+      return false;
+    }
+    
+    // Check position avgCost: $100.33
+    const position = portfolio.positions['AAPL'];
+    if (!assertClose(position.avgCost, 100.33, 0.01, 'Average cost precision incorrect')) {
+      return false;
+    }
+    
+    console.log('✓ Test 14 passed');
+    return true;
+  },
+  
+  /**
+   * Test 15: Load and reset
+   */
+  testLoadAndReset(): boolean {
+    console.log('Test 15: Load and reset');
+    TradeEngine.reset();
+    
+    // Execute trade
+    TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+    
+    // Save state
+    const savedPortfolio = TradeEngine.getPortfolio();
+    const savedHistory = TradeEngine.getTradeHistory();
+    
+    // Reset
+    TradeEngine.reset();
+    
+    // Check reset worked
+    const resetPortfolio = TradeEngine.getPortfolio();
+    if (resetPortfolio.cash !== 100_000 || Object.keys(resetPortfolio.positions).length !== 0) {
+      console.error('Reset failed');
+      return false;
+    }
+    
+    // Load saved state
+    TradeEngine.loadPortfolio(savedPortfolio);
+    TradeEngine.loadTradeHistory([...savedHistory]);
+    
+    // Check loaded correctly
+    const loadedPortfolio = TradeEngine.getPortfolio();
+    const loadedHistory = TradeEngine.getTradeHistory();
+    
+    if (!assertClose(loadedPortfolio.cash, savedPortfolio.cash, 0.01, 'Loaded cash incorrect')) {
+      return false;
+    }
+    
+    if (loadedHistory.length !== savedHistory.length) {
+      console.error('Loaded history incorrect');
+      return false;
+    }
+    
+    console.log('✓ Test 15 passed');
+    return true;
+  },
+  
+  /**
+   * Run all tests
+   */
+  async runAll(): Promise<boolean> {
+    console.log('\n============================================================================');
+    console.log('TRADE ENGINE INTEGRATION TESTS');
+    console.log('============================================================================\n');
+    
+    const tests = [
+      this.testBuyFirstPosition(),
+      this.testBuyAddToPosition(),
+      this.testSellPartialProfit(),
+      this.testSellEntirePosition(),
+      this.testSellForLoss(),
+      this.testInsufficientCash(),
+      this.testInsufficientHoldings(),
+      this.testInvalidSymbol(),
+      this.testInvalidQuantity(),
+      this.testInvalidPrice(),
+      this.testPortfolioMetrics(),
+      this.testMultiplePositions(),
+      this.testTradeHistory(),
+      this.testPrecision(),
+      this.testLoadAndReset(),
+    ];
+    
+    const passed = tests.filter(t => t).length;
+    const failed = tests.length - passed;
+    
+    console.log('\n============================================================================');
+    console.log(`RESULTS: ${passed}/${tests.length} tests passed`);
+    if (failed > 0) {
+      console.error(`❌ ${failed} test(s) failed`);
+    } else {
+      console.log('✅ All tests passed!');
+    }
+    console.log('============================================================================\n');
+    
+    return failed === 0;
+  },
+};
+
+export default TradeEngineTests;

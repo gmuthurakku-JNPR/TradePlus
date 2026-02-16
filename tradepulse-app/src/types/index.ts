@@ -77,6 +77,14 @@ export interface TradeValidation {
 /**
  * ORDER MODULE TYPES
  */
+export type OrderStatus = 
+  | 'pending'    // Order created, monitoring price
+  | 'triggered'  // Price condition met, executing trade
+  | 'filled'     // Trade successfully executed
+  | 'cancelled'  // User cancelled order
+  | 'expired'    // Order expired (time-based)
+  | 'failed';    // Execution failed
+
 export interface LimitOrder {
   id: string;
   symbol: string;
@@ -84,7 +92,14 @@ export interface LimitOrder {
   limitPrice: number;
   quantity: number;
   createdAt: number;
-  status: 'open' | 'filled' | 'cancelled';
+  status: OrderStatus;
+  triggeredAt?: number;
+  filledAt?: number;
+  cancelledAt?: number;
+  executedPrice?: number;
+  executedTotal?: number;
+  tradeId?: string;
+  error?: string;
 }
 
 export interface OrderRequest {

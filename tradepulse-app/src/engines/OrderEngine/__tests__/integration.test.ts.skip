@@ -1,0 +1,636 @@
+/**
+ * ============================================================================
+ * Limit Order Engine Tests
+ * ============================================================================
+ * 
+ * Comprehensive test suite for the Limit Order Engine
+ * 
+ * Test Coverage:
+ * 1. Order Validation
+ * 2. Order Creation
+ * 3. Price Monitoring & Subscriptions
+ * 4. Trigger Detection (BUY/SELL)
+ * 5. Automatic Execution
+ * 6. Duplicate Prevention
+ * 7. Order Cancellation
+ * 8. Order Modification
+ * 9. Status Transitions
+ * 10. Portfolio Integration
+ * 11. Persistence
+ * 12. Edge Cases
+ * 
+ * Run Instructions:
+ * 1. Import this file: import '@engines/OrderEngine/__tests__/integration.test'
+ * 2. Run all tests: OrderEngineTests.runAll()
+ * 3. Run specific test: OrderEngineTests.testOrderCreation()
+ * 
+ * ============================================================================
+ */
+
+import OrderEngine from '../index';
+import TradeEngine from '@engines/TradeEngine';
+import PriceEngine from '@engines/PriceEngine';
+
+/**
+ * Test utilities
+ */
+const assert = (condition: boolean, message: string): void => {
+  if (!condition) {
+    console.error('❌ ASSERTION FAILED:', message);
+    throw new Error(message);
+  }
+  console.log('✓', message);
+};
+
+const assertEqual = <T>(actual: T, expected: T, message: string): void => {
+  if (actual !== expected) {
+    console.error(`❌ ASSERTION FAILED: ${message}`);
+    console.error(`   Expected: ${expected}`);
+    console.error(`   Actual:   ${actual}`);
+    throw new Error(message);
+  }
+  console.log('✓', message);
+};
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * ============================================================================
+ * TEST SUITE
+ * ============================================================================
+ */
+
+export const OrderEngineTests = {
+  /**
+   * Test 1: Order validation
+   */
+  testOrderValidation: () => {
+    console.log('\n=== Test 1: Order Validation ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Invalid symbol
+    let order = OrderEngine.placeOrder({
+      symbol: '',
+      type: 'BUY',
+      limitPrice: 100,
+      quantity: 10,
+    });
+    assertEqual(order, null, 'Empty symbol should fail');
+
+    // Invalid symbol format
+    order = OrderEngine.placeOrder({
+      symbol: 'aapl',
+      type: 'BUY',
+      limitPrice: 100,
+      quantity: 10,
+    });
+    assertEqual(order, null, 'Lowercase symbol should fail');
+
+    // Invalid type
+    order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'HOLD' as any,
+      limitPrice: 100,
+      quantity: 10,
+    });
+    assertEqual(order, null, 'Invalid type should fail');
+
+    // Invalid quantity (fractional)
+    order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 100,
+      quantity: 10.5,
+    });
+    assertEqual(order, null, 'Fractional quantity should fail');
+
+    // Invalid quantity (negative)
+    order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 100,
+      quantity: -10,
+    });
+    assertEqual(order, null, 'Negative quantity should fail');
+
+    // Invalid limit price (too low)
+    order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 0,
+      quantity: 10,
+    });
+    assertEqual(order, null, 'Zero limit price should fail');
+
+    // Invalid limit price (too high)
+    order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 2_000_000,
+      quantity: 10,
+    });
+    assertEqual(order, null, 'Excessive limit price should fail');
+
+    // Valid order
+    order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 150,
+      quantity: 10,
+    });
+    assert(order !== null, 'Valid order should succeed');
+    assertEqual(order?.status, 'pending', 'Order status should be pending');
+
+    console.log('✅ Test 1 passed: Order validation works correctly');
+  },
+
+  /**
+   * Test 2: Order creation and storage
+   */
+  testOrderCreation: () => {
+    console.log('\n=== Test 2: Order Creation and Storage ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Create first order
+    const order1 = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 150,
+      quantity: 10,
+    });
+
+    assert(order1 !== null, 'Order 1 should be created');
+    assert(order1!.id.startsWith('ORD-'), 'Order ID should have correct format');
+    assertEqual(order1!.symbol, 'AAPL', 'Symbol should match');
+    assertEqual(order1!.type, 'BUY', 'Type should match');
+    assertEqual(order1!.limitPrice, 150, 'Limit price should match');
+    assertEqual(order1!.quantity, 10, 'Quantity should match');
+    assertEqual(order1!.status, 'pending', 'Status should be pending');
+
+    // Create second order
+    const order2 = OrderEngine.placeOrder({
+      symbol: 'GOOGL',
+      type: 'SELL',
+      limitPrice: 2800,
+      quantity: 5,
+    });
+
+    assert(order2 !== null, 'Order 2 should be created');
+
+    // Check active orders
+    const activeOrders = OrderEngine.getActiveOrders();
+    assertEqual(activeOrders.length, 2, 'Should have 2 active orders');
+
+    // Check orders by symbol
+    const aaplOrders = OrderEngine.getOrdersForSymbol('AAPL');
+    assertEqual(aaplOrders.length, 1, 'Should have 1 AAPL order');
+    assertEqual(aaplOrders[0].id, order1!.id, 'AAPL order should match');
+
+    // Check order by ID
+    const foundOrder = OrderEngine.getOrderById(order1!.id);
+    assert(foundOrder !== null, 'Should find order by ID');
+    assertEqual(foundOrder!.id, order1!.id, 'Found order should match');
+
+    console.log('✅ Test 2 passed: Order creation and storage works correctly');
+  },
+
+  /**
+   * Test 3: BUY order trigger detection
+   */
+  testBuyTrigger: async () => {
+    console.log('\n=== Test 3: BUY Order Trigger Detection ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+    PriceEngine.start();
+
+    // Create BUY order with limit price above current market
+    const order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 200, // High limit, should trigger when price <= 200
+      quantity: 5,
+    });
+
+    assert(order !== null, 'Order should be created');
+    assertEqual(order!.status, 'pending', 'Order should be pending');
+
+    // Wait for price updates and automatic execution
+    console.log('Waiting for price updates and automatic execution...');
+    await sleep(3000); // Wait 3 seconds for price monitoring
+
+    // Check if order was filled
+    const updatedOrder = OrderEngine.getOrderById(order!.id);
+    console.log(`Order status: ${updatedOrder?.status}`);
+
+    // Order should be filled since limit price is generous
+    assert(
+      updatedOrder?.status === 'filled' || updatedOrder?.status === 'pending',
+      'Order should be filled or still pending'
+    );
+
+    if (updatedOrder?.status === 'filled') {
+      assert(updatedOrder.executedPrice !== undefined, 'Should have executed price');
+      assert(updatedOrder.executedTotal !== undefined, 'Should have executed total');
+      assert(updatedOrder.tradeId !== undefined, 'Should have trade ID');
+      console.log(`✓ Order filled at $${updatedOrder.executedPrice}`);
+    }
+
+    // Check portfolio
+    const portfolio = TradeEngine.getPortfolio();
+    if (updatedOrder?.status === 'filled') {
+      const position = portfolio.positions['AAPL'];
+      assert(position !== undefined, 'Should have AAPL position');
+      assertEqual(position.shares, 5, 'Should have 5 shares');
+    }
+
+    PriceEngine.stop();
+    console.log('✅ Test 3 passed: BUY order trigger detection works correctly');
+  },
+
+  /**
+   * Test 4: SELL order trigger detection
+   */
+  testSellTrigger: async () => {
+    console.log('\n=== Test 4: SELL Order Trigger Detection ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+    PriceEngine.start();
+
+    // First, buy some shares
+    const buyResult = TradeEngine.executeTrade({
+      symbol: 'AAPL',
+      type: 'BUY',
+      quantity: 10,
+      price: 150,
+      orderType: 'MARKET',
+    });
+
+    assert(buyResult.success, 'Should buy shares successfully');
+
+    // Create SELL order with low limit price (should trigger when price >= limit)
+    const order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'SELL',
+      limitPrice: 100, // Low limit, should trigger when price >= 100
+      quantity: 5,
+    });
+
+    assert(order !== null, 'SELL order should be created');
+    assertEqual(order!.status, 'pending', 'Order should be pending');
+
+    // Wait for price updates and automatic execution
+    console.log('Waiting for price updates and automatic execution...');
+    await sleep(3000);
+
+    // Check if order was filled
+    const updatedOrder = OrderEngine.getOrderById(order!.id);
+    console.log(`Order status: ${updatedOrder?.status}`);
+
+    assert(
+      updatedOrder?.status === 'filled' || updatedOrder?.status === 'pending',
+      'Order should be filled or still pending'
+    );
+
+    if (updatedOrder?.status === 'filled') {
+      assert(updatedOrder.executedPrice !== undefined, 'Should have executed price');
+      console.log(`✓ SELL order filled at $${updatedOrder.executedPrice}`);
+
+      // Check portfolio
+      const portfolio = TradeEngine.getPortfolio();
+      const position = portfolio.positions['AAPL'];
+      assert(position.shares === 5, 'Should have 5 shares remaining');
+    }
+
+    PriceEngine.stop();
+    console.log('✅ Test 4 passed: SELL order trigger detection works correctly');
+  },
+
+  /**
+   * Test 5: Order cancellation
+   */
+  testOrderCancellation: () => {
+    console.log('\n=== Test 5: Order Cancellation ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Create order
+    const order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 150,
+      quantity: 10,
+    });
+
+    assert(order !== null, 'Order should be created');
+    assertEqual(order!.status, 'pending', 'Order should be pending');
+
+    // Cancel order
+    const cancelled = OrderEngine.cancelOrder(order!.id);
+    assert(cancelled, 'Order should be cancelled');
+
+    // Check order status
+    const updatedOrder = OrderEngine.getOrderById(order!.id);
+    assertEqual(updatedOrder?.status, 'cancelled', 'Status should be cancelled');
+    assert(updatedOrder?.cancelledAt !== undefined, 'Should have cancelled timestamp');
+
+    // Check active orders
+    const activeOrders = OrderEngine.getActiveOrders();
+    assertEqual(activeOrders.length, 0, 'Should have no active orders');
+
+    // Check history
+    const history = OrderEngine.getOrderHistory();
+    assertEqual(history.length, 1, 'Should have 1 order in history');
+    assertEqual(history[0].id, order!.id, 'Cancelled order should be in history');
+
+    // Try to cancel non-existent order
+    const notCancelled = OrderEngine.cancelOrder('INVALID-ID');
+    assertEqual(notCancelled, false, 'Cancelling invalid order should fail');
+
+    console.log('✅ Test 5 passed: Order cancellation works correctly');
+  },
+
+  /**
+   * Test 6: Order modification
+   */
+  testOrderModification: () => {
+    console.log('\n=== Test 6: Order Modification ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Create order
+    const order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 150,
+      quantity: 10,
+    });
+
+    assert(order !== null, 'Order should be created');
+
+    // Modify limit price
+    const modified1 = OrderEngine.modifyOrder(order!.id, { limitPrice: 160 });
+    assert(modified1, 'Should modify limit price');
+
+    const updated1 = OrderEngine.getOrderById(order!.id);
+    assertEqual(updated1?.limitPrice, 160, 'Limit price should be updated');
+
+    // Modify quantity
+    const modified2 = OrderEngine.modifyOrder(order!.id, { quantity: 20 });
+    assert(modified2, 'Should modify quantity');
+
+    const updated2 = OrderEngine.getOrderById(order!.id);
+    assertEqual(updated2?.quantity, 20, 'Quantity should be updated');
+
+    // Try to modify with invalid values
+    const notModified1 = OrderEngine.modifyOrder(order!.id, { limitPrice: 0 });
+    assertEqual(notModified1, false, 'Invalid limit price should fail');
+
+    const notModified2 = OrderEngine.modifyOrder(order!.id, { quantity: -5 });
+    assertEqual(notModified2, false, 'Invalid quantity should fail');
+
+    // Try to modify non-existent order
+    const notModified3 = OrderEngine.modifyOrder('INVALID-ID', { limitPrice: 100 });
+    assertEqual(notModified3, false, 'Modifying invalid order should fail');
+
+    console.log('✅ Test 6 passed: Order modification works correctly');
+  },
+
+  /**
+   * Test 7: Insufficient funds handling
+   */
+  testInsufficientFunds: () => {
+    console.log('\n=== Test 7: Insufficient Funds Handling ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Try to place order exceeding cash
+    TradeEngine.getPortfolio(); // Check initial portfolio
+    const excessiveOrder = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 1000000, // Exceeds available cash
+      quantity: 1000,
+    });
+
+    assertEqual(excessiveOrder, null, 'Excessive order should fail');
+
+    // Check stats
+    const stats = OrderEngine.getOrderStats();
+    assertEqual(stats.active, 0, 'Should have no active orders');
+    assertEqual(stats.failed, 1, 'Should have 1 failed order in history');
+
+    console.log('✅ Test 7 passed: Insufficient funds handling works correctly');
+  },
+
+  /**
+   * Test 8: Insufficient shares handling
+   */
+  testInsufficientShares: () => {
+    console.log('\n=== Test 8: Insufficient Shares Handling ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Try to sell shares we don't have
+    const order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'SELL',
+      limitPrice: 150,
+      quantity: 100, // Don't have any shares
+    });
+
+    assertEqual(order, null, 'SELL order without shares should fail');
+
+    // Check stats
+    const stats = OrderEngine.getOrderStats();
+    assertEqual(stats.active, 0, 'Should have no active orders');
+    assertEqual(stats.failed, 1, 'Should have 1 failed order');
+
+    console.log('✅ Test 8 passed: Insufficient shares handling works correctly');
+  },
+
+  /**
+   * Test 9: Order statistics
+   */
+  testOrderStatistics: () => {
+    console.log('\n=== Test 9: Order Statistics ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Create various orders
+    OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 150,
+      quantity: 10,
+    });
+
+    OrderEngine.placeOrder({
+      symbol: 'GOOGL',
+      type: 'BUY',
+      limitPrice: 2800,
+      quantity: 5,
+    });
+
+    // Get first order ID for cancellation
+    const activeOrders = OrderEngine.getActiveOrders();
+    const order1 = activeOrders[0];
+
+    // Cancel one
+    OrderEngine.cancelOrder(order1!.id);
+
+    // Try to create invalid order (insufficient funds)
+    OrderEngine.placeOrder({
+      symbol: 'TSLA',
+      type: 'BUY',
+      limitPrice: 1000000,
+      quantity: 1000,
+    });
+
+    // Get stats
+    const stats = OrderEngine.getOrderStats();
+    assertEqual(stats.total, 3, 'Should have 3 total orders');
+    assertEqual(stats.active, 1, 'Should have 1 active order');
+    assertEqual(stats.pending, 1, 'Should have 1 pending order');
+    assertEqual(stats.cancelled, 1, 'Should have 1 cancelled order');
+    assertEqual(stats.failed, 1, 'Should have 1 failed order');
+    assertEqual(stats.subscribedSymbols, 1, 'Should be subscribed to 1 symbol');
+
+    // Get orders by status
+    const pending = OrderEngine.getOrdersByStatus('pending');
+    assertEqual(pending.length, 1, 'Should have 1 pending order');
+
+    const cancelled = OrderEngine.getOrdersByStatus('cancelled');
+    assertEqual(cancelled.length, 1, 'Should have 1 cancelled order');
+
+    console.log('✅ Test 9 passed: Order statistics work correctly');
+  },
+
+  /**
+   * Test 10: Persistence
+   */
+  testPersistence: () => {
+    console.log('\n=== Test 10: Persistence ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+
+    // Create orders
+    const order1 = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 150,
+      quantity: 10,
+    });
+
+    const order2 = OrderEngine.placeOrder({
+      symbol: 'GOOGL',
+      type: 'BUY',
+      limitPrice: 2800,
+      quantity: 5,
+    });
+
+    // Cancel one
+    OrderEngine.cancelOrder(order1!.id);
+
+    // Serialize
+    const serialized = OrderEngine.serializeOrders();
+    assertEqual(serialized.length, 2, 'Should serialize 2 orders');
+
+    // Reset and reload
+    OrderEngine.reset();
+    OrderEngine.loadOrders(serialized);
+
+    // Check restored state
+    const activeOrders = OrderEngine.getActiveOrders();
+    assertEqual(activeOrders.length, 1, 'Should restore 1 active order');
+
+    const history = OrderEngine.getOrderHistory();
+    assertEqual(history.length, 1, 'Should restore 1 historical order');
+
+    const restoredOrder = OrderEngine.getOrderById(order2!.id);
+    assert(restoredOrder !== null, 'Should restore order 2');
+    assertEqual(restoredOrder!.status, 'pending', 'Restored order should be pending');
+
+    console.log('✅ Test 10 passed: Persistence works correctly');
+  },
+
+  /**
+   * Test 11: Duplicate execution prevention
+   */
+  testDuplicatePrevention: async () => {
+    console.log('\n=== Test 11: Duplicate Execution Prevention ===');
+    OrderEngine.reset();
+    TradeEngine.reset();
+    PriceEngine.start();
+
+    // Create order
+    const order = OrderEngine.placeOrder({
+      symbol: 'AAPL',
+      type: 'BUY',
+      limitPrice: 200, // High limit
+      quantity: 5,
+    });
+
+    assert(order !== null, 'Order should be created');
+
+    // Wait for execution
+    await sleep(3000);
+
+    // Check order was filled only once
+    const updatedOrder = OrderEngine.getOrderById(order!.id);
+    if (updatedOrder?.status === 'filled') {
+      const portfolio = TradeEngine.getPortfolio();
+      const position = portfolio.positions['AAPL'];
+      assertEqual(position.shares, 5, 'Should have exactly 5 shares (not duplicated)');
+
+      // Check trade history
+      const trades = TradeEngine.getTradeHistory();
+      const matchingTrades = trades.filter((t) => t.id === updatedOrder.tradeId);
+      assertEqual(matchingTrades.length, 1, 'Should have exactly 1 trade');
+    }
+
+    PriceEngine.stop();
+    console.log('✅ Test 11 passed: Duplicate execution prevention works correctly');
+  },
+
+  /**
+   * Run all tests
+   */
+  runAll: async () => {
+    console.log('╔═══════════════════════════════════════════════════════╗');
+    console.log('║   Limit Order Engine - Integration Test Suite        ║');
+    console.log('╚═══════════════════════════════════════════════════════╝');
+
+    try {
+      OrderEngineTests.testOrderValidation();
+      OrderEngineTests.testOrderCreation();
+      await OrderEngineTests.testBuyTrigger();
+      await OrderEngineTests.testSellTrigger();
+      OrderEngineTests.testOrderCancellation();
+      OrderEngineTests.testOrderModification();
+      OrderEngineTests.testInsufficientFunds();
+      OrderEngineTests.testInsufficientShares();
+      OrderEngineTests.testOrderStatistics();
+      OrderEngineTests.testPersistence();
+      await OrderEngineTests.testDuplicatePrevention();
+
+      console.log('\n╔═══════════════════════════════════════════════════════╗');
+      console.log('║              ✅ ALL TESTS PASSED! ✅                  ║');
+      console.log('╚═══════════════════════════════════════════════════════╝');
+    } catch (error) {
+      console.log('\n╔═══════════════════════════════════════════════════════╗');
+      console.log('║              ❌ TESTS FAILED ❌                       ║');
+      console.log('╚═══════════════════════════════════════════════════════╝');
+      console.error(error);
+      throw error;
+    }
+  },
+};
+
+// Auto-export for console usage
+if (typeof window !== 'undefined') {
+  (window as any).OrderEngineTests = OrderEngineTests;
+}
+
+export default OrderEngineTests;

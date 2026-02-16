@@ -1,0 +1,305 @@
+/**
+ * Portfolio Summary Component Styles
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.1));
+  overflow: hidden;
+}
+
+/* Header */
+.header {
+  padding: var(--spacing-lg, 16px) var(--spacing-xl, 20px);
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-surface, #ffffff);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg, 18px);
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+}
+
+.titleIcon {
+  font-size: var(--font-size-xl, 20px);
+}
+
+/* Content */
+.content {
+  padding: var(--spacing-xl, 20px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl, 20px);
+}
+
+/* Main Metric (Total Value) */
+.mainMetric {
+  text-align: center;
+  padding: var(--spacing-lg, 16px);
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-radius: var(--radius-md, 8px);
+}
+
+.mainMetric .metricLabel {
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-text-secondary, #6b7280);
+  margin-bottom: var(--spacing-xs, 4px);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.mainMetric .metricValue {
+  font-size: var(--font-size-3xl, 32px);
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+  font-family: var(--font-mono, 'SFMono-Regular', Consolas, monospace);
+}
+
+/* Total P&L Display */
+.plMetric {
+  text-align: center;
+  padding: var(--spacing-md, 12px);
+  border-radius: var(--radius-md, 8px);
+  border: 2px solid var(--color-border, #e5e7eb);
+}
+
+.plLabel {
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-text-secondary, #6b7280);
+  margin-bottom: var(--spacing-xs, 4px);
+  font-weight: 600;
+}
+
+.plValue {
+  font-size: var(--font-size-2xl, 24px);
+  font-weight: 700;
+  font-family: var(--font-mono, 'SFMono-Regular', Consolas, monospace);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm, 8px);
+}
+
+.plArrow {
+  font-size: var(--font-size-lg, 18px);
+}
+
+.plPercent {
+  font-size: var(--font-size-md, 16px);
+  opacity: 0.8;
+}
+
+/* Color states for P&L */
+.positive {
+  color: var(--color-success, #10b981);
+}
+
+.negative {
+  color: var(--color-error, #ef4444);
+}
+
+.neutral {
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Metrics Grid */
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-lg, 16px);
+}
+
+.metric {
+  padding: var(--spacing-md, 12px);
+  background: var(--color-background, #f9fafb);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.metricLabel {
+  font-size: var(--font-size-xs, 12px);
+  color: var(--color-text-secondary, #6b7280);
+  margin-bottom: var(--spacing-xs, 4px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.metricValue {
+  font-size: var(--font-size-lg, 18px);
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+  font-family: var(--font-mono, 'SFMono-Regular', Consolas, monospace);
+  margin-bottom: var(--spacing-xs, 4px);
+}
+
+.metricSubtext {
+  font-size: var(--font-size-xs, 12px);
+  color: var(--color-text-tertiary, #9ca3af);
+}
+
+/* Holdings Summary */
+.holdingsSummary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-md, 12px);
+  background: var(--color-background, #f9fafb);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.holdingsCount {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm, 8px);
+  font-size: var(--font-size-sm, 14px);
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+
+.holdingsIcon {
+  font-size: var(--font-size-lg, 18px);
+}
+
+.initialCash {
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Loading State */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-3xl, 48px);
+  gap: var(--spacing-md, 12px);
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border, #e5e7eb);
+  border-top-color: var(--color-primary, #3b82f6);
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Empty State */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-3xl, 48px);
+  gap: var(--spacing-md, 12px);
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+
+.empty h3 {
+  margin: 0;
+  font-size: var(--font-size-lg, 18px);
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+
+.empty p {
+  margin: 0;
+  font-size: var(--font-size-sm, 14px);
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .mainMetric .metricValue {
+    font-size: var(--font-size-2xl, 24px);
+  }
+
+  .plValue {
+    font-size: var(--font-size-xl, 20px);
+  }
+
+  .metricsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .holdingsSummary {
+    flex-direction: column;
+    gap: var(--spacing-sm, 8px);
+    align-items: flex-start;
+  }
+}
+
+/* Dark Mode */
+@media (prefers-color-scheme: dark) {
+  .container {
+    background: var(--color-surface-dark, #1f2937);
+    border-color: var(--color-border-dark, #374151);
+  }
+
+  .header {
+    background: var(--color-surface-dark, #1f2937);
+    border-color: var(--color-border-dark, #374151);
+  }
+
+  .title {
+    color: var(--color-text-primary-dark, #f9fafb);
+  }
+
+  .mainMetric {
+    background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  }
+
+  .mainMetric .metricValue {
+    color: var(--color-text-primary-dark, #f9fafb);
+  }
+
+  .plMetric {
+    border-color: var(--color-border-dark, #374151);
+  }
+
+  .metric {
+    background: var(--color-background-dark, #111827);
+    border-color: var(--color-border-dark, #374151);
+  }
+
+  .metricValue {
+    color: var(--color-text-primary-dark, #f9fafb);
+  }
+
+  .holdingsSummary {
+    background: var(--color-background-dark, #111827);
+    border-color: var(--color-border-dark, #374151);
+  }
+
+  .holdingsCount {
+    color: var(--color-text-primary-dark, #f9fafb);
+  }
+
+  .empty h3 {
+    color: var(--color-text-primary-dark, #f9fafb);
+  }
+}

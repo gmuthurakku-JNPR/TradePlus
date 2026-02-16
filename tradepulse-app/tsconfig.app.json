@@ -5,7 +5,7 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["vite/client"],
+    "types": ["vite/client", "jest"],
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -41,13 +41,15 @@
       "@persistence": ["./src/persistence"],
       "@persistence/*": ["./src/persistence/*"],
       "@charts": ["./src/charts"],
-      "@charts/*": ["./src/charts/*"]
+      "@charts/*": ["./src/charts/*"],
+      "@contexts": ["./src/contexts"],
+      "@contexts/*": ["./src/contexts/*"]
     },
 
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedParameters": false,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true

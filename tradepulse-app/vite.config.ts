@@ -19,6 +19,7 @@ export default defineConfig({
       '@services': path.resolve(__dirname, './src/services'),
       '@persistence': path.resolve(__dirname, './src/persistence'),
       '@charts': path.resolve(__dirname, './src/charts'),
+      '@contexts': path.resolve(__dirname, './src/contexts'),
     },
   },
   server: {
