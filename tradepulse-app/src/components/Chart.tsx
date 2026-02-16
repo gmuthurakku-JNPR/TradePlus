@@ -280,28 +280,6 @@ export function Chart({ theme = 'dark' }: ChartProps) {
     downFaint: isDark ? '#ef444444' : '#ef444466',
   };
 
-  // Generate synthetic historical data for initial chart display
-  const generateInitialHistory = (basePrice: number, numPoints: number = 300): any[] => {
-    // Generate backwards from current time
-    const now = Date.now();
-    const points: any[] = [];
-    
-    // Use random walk with more volatility to generate realistic historical data
-    let price = basePrice * 0.995; // Start 0.5% lower
-    for (let i = numPoints - 1; i >= 0; i--) {
-      // Larger random change (-1% to +1%) for more visible variation
-      const change = price * (Math.random() - 0.5) * 0.02;
-      price = Math.max(basePrice * 0.98, Math.min(basePrice * 1.02, price + change));
-      
-      points.push({
-        price: price,
-        timestamp: now - (i * 1000), // 1 second intervals going back
-      });
-    }
-    
-    return points;
-  };
-
   // Get available symbols on mount
   useEffect(() => {
     const availableSymbols = PriceEngine.getAvailableSymbols();
@@ -309,63 +287,11 @@ export function Chart({ theme = 'dark' }: ChartProps) {
   }, []);
 
   useEffect(() => {
+    PriceEngine.reset();
     let unsubscribe: (() => void) | null = null;
     let rawPoints: any[] = [];
-    let isFirstUpdate = true;
-    
-    // Start PriceEngine first
-    PriceEngine.start();
-    
-    // Subscribe to symbol (this initializes it if not already initialized)
+
     unsubscribe = PriceEngine.subscribe(symbol, (priceData: PriceData) => {
-      // On first update, load 5 minutes of historical data
-      if (isFirstUpdate) {
-        isFirstUpdate = false;
-        
-        // Check for existing history first
-        const existingHistory = PriceEngine.getHistory(symbol);
-        
-        if (existingHistory.length >= 300) {
-          // Use existing history (first 5 minutes = 300 points)
-          rawPoints = existingHistory.slice(0, 300).map((point) => ({
-            price: point.price,
-            timestamp: point.timestamp,
-          }));
-        } else if (existingHistory.length > 0) {
-          // Use whatever history exists
-          rawPoints = existingHistory.map((point) => ({
-            price: point.price,
-            timestamp: point.timestamp,
-          }));
-          
-          // Fill remaining with synthetic data
-          const needed = 300 - rawPoints.length;
-          if (needed > 0) {
-            const syntheticData = generateInitialHistory(priceData.price, needed);
-            rawPoints = [...syntheticData, ...rawPoints];
-          }
-        } else {
-          // No history exists - generate full 5 minutes of synthetic data
-          rawPoints = generateInitialHistory(priceData.price, 300);
-        }
-        
-        // Immediately display the historical data
-        const aggregated = aggregatePrices(rawPoints, timeframe);
-        setChartPoints(aggregated);
-        
-        if (aggregated.length > 0) {
-          const lastCandle = aggregated[aggregated.length - 1];
-          const prices = aggregated.map((p) => p.high || p.price);
-          setStats({
-            high: Math.max(...prices),
-            low: Math.min(...aggregated.map((p) => p.low || p.price)),
-            open: aggregated[0].open || aggregated[0].price,
-            close: lastCandle.close || lastCandle.price,
-          });
-        }
-      }
-      
-      // Add new price data (for all updates including first)
       rawPoints.push({
         price: priceData.price,
         timestamp: Date.now(),
@@ -393,48 +319,68 @@ export function Chart({ theme = 'dark' }: ChartProps) {
       }
     });
 
+    PriceEngine.start();
+
     return () => {
       if (unsubscribe) unsubscribe();
       PriceEngine.stop();
     };
   }, [symbol, timeframe]);
 
-  // ============================================================================
-  // Y-AXIS CALCULATION - BASED ON LAST 5 MINUTES OF DATA
-  // ============================================================================
+  // Calculate price range with padding for better visualization
+  const rawMaxPrice = Math.max(...chartPoints.map((p) => p.high || p.price), stats.high || 100);
+  const rawMinPrice = Math.min(...chartPoints.map((p) => p.low || p.price), stats.low || 50);
+  const rawRange = rawMaxPrice - rawMinPrice || 1;
+  const padding = rawRange * 0.05; // 5% padding on each side
+  const maxPrice = rawMaxPrice + padding;
+  const minPrice = Math.max(0, rawMinPrice - padding); // Don't go below 0
+
+  // Smart Y-axis label generator - creates neat, rounded intervals
+  const generateNeatYAxisLabels = (min: number, max: number, targetCount: number = 5) => {
+    const range = max - min;
+    if (range === 0) return Array(targetCount).fill(min);
+    
+    // Calculate nice step size
+    const magnitude = Math.pow(10, Math.floor(Math.log10(range)));
+    let step = magnitude;
+    
+    // Adjust step to be 1, 2, or 5 times the magnitude
+    const steps = [1, 2, 5];
+    for (const s of steps) {
+      const possibleStep = s * magnitude;
+      const possibleCount = Math.ceil(range / possibleStep);
+      if (possibleCount <= targetCount + 1) {
+        step = possibleStep;
+        break;
+      }
+    }
+    
+    // Round min/max to step
+    const adjustedMin = Math.floor(min / step) * step;
+    const adjustedMax = Math.ceil(max / step) * step;
+    const adjustedRange = adjustedMax - adjustedMin;
+    
+    // Generate labels
+    const labels: number[] = [];
+    const count = Math.round(adjustedRange / step);
+    for (let i = 0; i <= count; i++) {
+      labels.push(adjustedMin + (i * step));
+    }
+    
+    // Return most relevant 5 labels
+    if (labels.length > targetCount) {
+      const step_idx = Math.ceil(labels.length / targetCount);
+      return labels.filter((_, i) => i % step_idx === 0).slice(0, targetCount);
+    }
+    return labels.slice(0, targetCount);
+  };
+
+  const yAxisLabels = generateNeatYAxisLabels(minPrice, maxPrice, 5);
   
-  // Calculate min/max from actual chart data (last 5 minutes)
-  const dataMin = chartPoints.length > 0 
-    ? Math.min(...chartPoints.map((p) => p.low || p.price))
-    : 149;
-  
-  const dataMax = chartPoints.length > 0
-    ? Math.max(...chartPoints.map((p) => p.high || p.price))
-    : 150;
-  
-  // Use exact data range - NO PADDING
-  const displayMinPrice = dataMin;
-  const displayMaxPrice = dataMax;
-  const displayPriceRange = displayMaxPrice - displayMinPrice || 0.01; // Prevent division by zero
-  
-  // Generate exactly 6 evenly spaced Y-axis tick values
-  const yAxisLabels: number[] = [];
-  const tickCount = 6;
-  const tickInterval = displayPriceRange / (tickCount - 1);
-  
-  for (let i = 0; i < tickCount; i++) {
-    yAxisLabels.push(displayMinPrice + (tickInterval * i));
-  }
-  
-  // Determine decimal places based on tick interval
-  let decimalPlaces = 2;
-  if (tickInterval < 0.01) {
-    decimalPlaces = 3;
-  } else if (tickInterval < 0.1) {
-    decimalPlaces = 2;
-  } else if (tickInterval >= 10) {
-    decimalPlaces = 1;
-  }
+  // Use neat Y-axis range for chart alignment
+  const displayMinPrice = Math.min(...yAxisLabels);
+  const displayMaxPrice = Math.max(...yAxisLabels);
+  const displayPriceRange = Math.max(displayMaxPrice - displayMinPrice, 1);
 
   // Get time range for X-axis context
   const timeStart = chartPoints.length > 0 ? chartPoints[0].time : '';
@@ -522,7 +468,7 @@ export function Chart({ theme = 'dark' }: ChartProps) {
               justifyContent: 'space-between',
               alignItems: 'flex-end',
               paddingRight: '0.75rem',
-              width: '70px',
+              width: '60px',
               fontSize: '0.8rem',
               fontWeight: '500',
               color: colors.text,
@@ -533,7 +479,7 @@ export function Chart({ theme = 'dark' }: ChartProps) {
                 : 'linear-gradient(90deg, rgba(249, 250, 251, 0.5) 0%, transparent 100%)',
               paddingLeft: '0.5rem',
             }}>
-              {[...yAxisLabels].reverse().map((price, idx) => (
+              {yAxisLabels.map((price, idx) => (
                 <div
                   key={idx}
                   style={{
@@ -542,9 +488,9 @@ export function Chart({ theme = 'dark' }: ChartProps) {
                     letterSpacing: '0.5px',
                     fontVariantNumeric: 'tabular-nums',
                   }}
-                  title={`Price: $${price.toFixed(decimalPlaces)}`}
+                  title={`Price: $${price.toFixed(2)}`}
                 >
-                  ${price.toFixed(decimalPlaces)}
+                  ${price.toFixed(2)}
                 </div>
               ))}
             </div>
@@ -590,6 +536,91 @@ export function Chart({ theme = 'dark' }: ChartProps) {
                 ))}
               </div>
 
+              {/* Price Line Connecting Points */}
+              <svg
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: 'calc(100% - 30px)',
+                  pointerEvents: 'none',
+                  zIndex: 1,
+                }}
+              >
+                {/* Close Price Line */}
+                <polyline
+                  points={chartPoints
+                    .map((point, idx) => {
+                      const closePrice = point.close || point.price;
+                      const closeNormalized = ((closePrice - displayMinPrice) / displayPriceRange) || 0.5;
+                      const x = ((idx + 0.5) / chartPoints.length) * 100;
+                      const y = (1 - closeNormalized) * 100;
+                      return `${x},${y}`;
+                    })
+                    .join(' ')}
+                  fill="none"
+                  stroke={isDark ? '#3b82f6' : '#2563eb'}
+                  strokeWidth="2.5"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  opacity="0.85"
+                  style={{
+                    filter: 'drop-shadow(0 2px 4px rgba(59, 130, 246, 0.4))',
+                  }}
+                />
+                
+                {/* High-Low Range Area */}
+                <polygon
+                  points={
+                    chartPoints
+                      .map((point, idx) => {
+                        const highPrice = point.high || point.price;
+                        const highNormalized = ((highPrice - displayMinPrice) / displayPriceRange) || 0.5;
+                        const x = ((idx + 0.5) / chartPoints.length) * 100;
+                        const y = (1 - highNormalized) * 100;
+                        return `${x},${y}`;
+                      })
+                      .join(' ') +
+                    ' ' +
+                    [...chartPoints]
+                      .reverse()
+                      .map((point, idx) => {
+                        const lowPrice = point.low || point.price;
+                        const lowNormalized = ((lowPrice - displayMinPrice) / displayPriceRange) || 0.5;
+                        const x = ((chartPoints.length - idx - 0.5) / chartPoints.length) * 100;
+                        const y = (1 - lowNormalized) * 100;
+                        return `${x},${y}`;
+                      })
+                      .join(' ')
+                  }
+                  fill={isDark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(37, 99, 235, 0.08)'}
+                  stroke="none"
+                />
+                
+                {/* Price Points */}
+                {chartPoints.map((point, idx) => {
+                  const closePrice = point.close || point.price;
+                  const closeNormalized = ((closePrice - displayMinPrice) / displayPriceRange) || 0.5;
+                  const x = ((idx + 0.5) / chartPoints.length) * 100;
+                  const y = (1 - closeNormalized) * 100;
+                  const isUp = (point.close || point.price) >= (point.open || point.price);
+                  
+                  return (
+                    <circle
+                      key={`point-${idx}`}
+                      cx={`${x}%`}
+                      cy={`${y}%`}
+                      r="3"
+                      fill={isUp ? '#10b981' : '#ef4444'}
+                      stroke={isDark ? '#1f2937' : '#ffffff'}
+                      strokeWidth="1.5"
+                      opacity="0.9"
+                    />
+                  );
+                })}
+              </svg>
+
               {/* Candlestick Chart */}
               <div style={{
                 display: 'flex',
@@ -601,22 +632,35 @@ export function Chart({ theme = 'dark' }: ChartProps) {
                 paddingBottom: '1.5rem',
                 paddingRight: '0.5rem',
                 paddingLeft: '0.5rem',
+                position: 'relative',
+                zIndex: 2,
               }}>
                 {chartPoints.map((point, idx) => {
                   const highNormalized =
-                    ((point.high !== undefined ? point.high : point.price) - displayMinPrice) / displayPriceRange * 100;
+                    ((point.high !== undefined ? point.high : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
                   const lowNormalized =
-                    ((point.low !== undefined ? point.low : point.price) - displayMinPrice) / displayPriceRange * 100;
+                    ((point.low !== undefined ? point.low : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
                   const openNormalized =
-                    ((point.open !== undefined ? point.open : point.price) - displayMinPrice) / displayPriceRange * 100;
+                    ((point.open !== undefined ? point.open : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
                   const closeNormalized =
-                    ((point.close !== undefined ? point.close : point.price) - displayMinPrice) / displayPriceRange * 100;
+                    ((point.close !== undefined ? point.close : point.price) - displayMinPrice) / displayPriceRange * 100 || 5;
                   
                   const isUp = (point.close || point.price) >= (point.open || point.price);
                   
-                  // Calculate body and wick heights
-                  const bodyHeight = Math.max(Math.abs(closeNormalized - openNormalized), 2);
-                  const wickHeight = Math.max(highNormalized - lowNormalized, 1);
+                  // Ensure minimum height for small ranges - scale up tiny candles
+                  let bodyHeight = Math.abs(closeNormalized - openNormalized);
+                  let wickHeight = highNormalized - lowNormalized;
+                  
+                  // If range is very small, amplify the display
+                  if (displayPriceRange < 1) {
+                    // Amplify up to 3x for very small ranges
+                    const amplification = Math.min(3, Math.max(1, 1 / (displayPriceRange * 100)));
+                    bodyHeight = Math.max(bodyHeight * amplification, 6);
+                    wickHeight = Math.max(wickHeight * amplification, 4);
+                  } else {
+                    bodyHeight = Math.max(bodyHeight, 5);
+                    wickHeight = Math.max(wickHeight, 2);
+                  }
                   
                   const volume = Math.random() * 0.4 + 0.2; // Simulated volume intensity
                   
@@ -639,13 +683,14 @@ export function Chart({ theme = 'dark' }: ChartProps) {
                         minWidth: '8px',
                         transition: 'all 0.2s ease',
                         cursor: 'pointer',
+                        opacity: 0.7,
                       }}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLElement).style.opacity = '1';
                         (e.currentTarget as HTMLElement).style.filter = 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.5))';
                       }}
                       onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLElement).style.opacity = '0.9';
+                        (e.currentTarget as HTMLElement).style.opacity = '0.7';
                         (e.currentTarget as HTMLElement).style.filter = 'none';
                       }}
                       title={`${point.time}: O: $${(point.open || point.price).toFixed(2)} H: $${(point.high || point.price).toFixed(2)} L: $${(point.low || point.price).toFixed(2)} C: $${(point.close || point.price).toFixed(2)}`}
@@ -867,7 +912,7 @@ export function Chart({ theme = 'dark' }: ChartProps) {
 
       <div style={getInfoStyle(colors)}>
         <p style={{ margin: 0, color: colors.textSecondary, fontSize: '0.875rem' }}>
-          📊 Displaying {chartPoints.length} candles ({timeframe}) | Price Range: ${displayMinPrice.toFixed(2)} - ${displayMaxPrice.toFixed(2)} | Time: {timeStart} → {timeEnd}
+          📊 Displaying {chartPoints.length} candles ({timeframe}) | Price Range: ${minPrice.toFixed(2)} - ${maxPrice.toFixed(2)} | Time: {timeStart} → {timeEnd}
         </p>
       </div>
     </div>
